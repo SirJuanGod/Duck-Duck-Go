@@ -37,3 +37,9 @@ env/
 # Archivos temporales del editor
 .DS_Store
 Thumbs.db
+
+.vscode/
+vscode/
+
+.agents/
+agents/
