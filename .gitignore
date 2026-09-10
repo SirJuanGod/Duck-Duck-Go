@@ -1,0 +1,39 @@
+# Logs y salidas de ejecucion
+logs/
+**/logs/
+*.log
+*.out
+*.tfevents.*
+
+# Modelos y artefactos entrenados
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Videos y capturas generadas
+videos/
+**/videos/
+*.mp4
+*.gif
+*.webm
+
+# Entornos locales y caches
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Variables de entorno y archivos sensibles
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+
+# Archivos temporales del editor
+.DS_Store
+Thumbs.db

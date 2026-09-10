@@ -1,0 +1,93 @@
+<?xml version="1.0" ?>
+<mujoco model="scene">
+
+  <!-- Incluye el robot completo (cinematica, colisiones, actuadores, sensores) -->
+  <include file="robot.xml" />
+
+  <!-- ===========================================================
+       VISUAL - Parametros de camara y renderizado de la escena
+       headlight: iluminacion difusa/ambiente para visualizacion interna
+       rgba haze: color de niebla de fondo (azul oscuro)
+       global: angulo azimutal y elevacion de la camara por defecto
+       =========================================================== -->
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0" />
+    <rgba haze="0.15 0.25 0.35 1" />
+    <global azimuth="160" elevation="-20" />
+  </visual>
+
+  <!-- ===========================================================
+       ASSETS de la escena (texturas del entorno, NO del robot)
+       skybox    : gradiente de cielo azul -> negro
+       groundplane: damero azulado con borde blanco
+       =========================================================== -->
+  <asset>
+    <texture type="skybox" builtin="gradient"
+             rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072" />
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300" />
+    <material name="groundplane" texture="groundplane"
+              texuniform="true" texrepeat="5 5" reflectance="0.2" />
+  </asset>
+
+  <!-- ===========================================================
+       WORLDBODY - Elementos del entorno (NO del robot)
+       La luz y el suelo se agregan aqui; el robot viene de robot.xml.
+       =========================================================== -->
+  <worldbody>
+    <!-- Luz direccional desde arriba (tipo sol) -->
+    <light pos="0 0 3.5" dir="0 0 -1" directional="true" />
+    <!-- Suelo infinito con textura de damero -->
+    <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="groundplane" />
+  </worldbody>
+
+  <!-- ===========================================================
+       KEYFRAMES - Posturas predefinidas del robot
+       qpos = [x y z qw qx qy qz
+               left_hip_yaw left_hip_roll left_hip_pitch left_knee left_ankle
+               neck_pitch head_pitch head_yaw head_roll
+               right_hip_yaw right_hip_roll right_hip_pitch right_knee right_ankle]
+       ctrl  = [mismos 14 DOF activos sin el freejoint]
+       =========================================================== -->
+  <keyframe>
+    <!-- Posicion inicial: todos los joints en cero -->
+    <key name="INIT"
+         qpos="0 0 0.12 1 0 0 0  0 0 0 0 0  0 0 0 0  0 0 0 0 0"
+         ctrl="0 0 0 0 0  0 0 0 0  0 0 0 0 0"/>
+
+    <!-- Postura erguida (STAND2): CoM ~5mm adelante sobre eje del tobillo.
+         Angulos en radianes: hip_pitch=26.24 deg, ankle=25.95 deg, knee=0.28 deg.
+         Calculados para postura estaticamente estable sin oscilaciones. -->
+    <key name="STAND"
+         qpos="0 0 0.12 1 0 0 0
+         0 -0.08726646259971647 -0.457924 -0.004940 0.452984
+         0.3490658503988659 0.3490658503988659 0 0
+         0 0.08726646259971647 0.457924 0.004940 -0.452984"
+         ctrl="0 -0.08726646259971647 -0.457924 -0.004940 0.452984
+         0.3490658503988659 0.3490658503988659 0 0
+         0 0.08726646259971647 0.457924 0.004940 -0.452984"
+    />
+
+    <!-- Postura sentado (SIT): piernas dobladas, altura reducida ~7cm -->
+    <key name="SIT"
+         qpos="0 0 0.07 1 0 0 0
+         0 0 -0.5236 1.0472
+         0 0.5 1.6 0
+         0 0 0 0.5236 -1.0472 0"
+         ctrl="0 0 -0.5236 1.0472 0
+         0.5 1.6 0 0
+         0 0 0.5236 -1.0472 0"/>
+
+    <!-- Postura plegada (FOLD): robot compacto, piernas a 90 deg -->
+    <key name="FOLD"
+         qpos="0 0 0.07 1 0 0 0
+         0 0 1.57 1.57 0
+         1 1 0 0
+         0 0 -1.57 -1.57 0"
+         ctrl="0 0 1.57 1.57 0
+         1 1 0 0
+         0 0 -1.57 -1.57 0"/>
+  </keyframe>
+
+</mujoco>
