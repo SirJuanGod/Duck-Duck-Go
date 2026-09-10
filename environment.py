@@ -62,7 +62,7 @@ class DuckDuckEnv(ManagedEnvironment):
                 camera_pos=(1.5, 1.5, 1.0),
                 camera_lookat=(0.0, 0.0, 0.5),
                 camera_fov=45,
-                max_FPS= int(0.5/self.dt)
+                refresh_rate= int(0.5/self.dt)
             ),
             rigid_options=gs.options.RigidOptions(
                 dt=self.dt,
