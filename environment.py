@@ -21,25 +21,6 @@ from genesis_forge.mdp import reset, terminations, observations, rewards
 HEIGHT_OFFSET = 0.09
 INITIAL_BODY_POSITION = [0.0, 0.0, HEIGHT_OFFSET]
 INITIAL_QUAT = [1.0, 0.0, 0.0, 0.0]
-INITIAL_JOINT_POSITIONS = np.array(
-    [
-        0.0,
-        -0.08726646259971647,
-        -0.457924,
-        -0.004940,
-        0.452984,
-        0.3490658503988659,
-        0.3490658503988659,
-        0.0,
-        0.0,
-        0.0,
-        0.08726646259971647,
-        0.457924,
-        0.004940,
-        -0.452984,
-    ],
-    dtype=np.float32,
-)
 
 def pose_to_T(pos=(0.0, 0.0, 0.0), quat=(1.0, 0.0, 0.0, 0.0)):
     """Convierte posicion (x,y,z) y cuaternion (w,x,y,z) a matriz homogenea 4x4."""
@@ -108,12 +89,6 @@ class DuckDuckEnv(ManagedEnvironment):
             ),
         )
 
-        joint_positions = torch.as_tensor(INITIAL_JOINT_POSITIONS, dtype=torch.float32)
-        if hasattr(self.robot, "set_joint_positions"):
-            self.robot.set_joint_positions(joint_positions) #type:ignore
-        elif hasattr(self.robot, "set_qpos"):
-            self.robot.set_qpos(joint_positions)
-
         self.camera = self.scene.add_camera(
             pos=(1.5, 1.5, 1.0),
             lookat=(0.0, 0.0, 0.1),
@@ -157,6 +132,22 @@ class DuckDuckEnv(ManagedEnvironment):
                 "right_hip.*", "right_knee", "right_ankle",
                 "neck_pitch", "head_pitch", "head_yaw", "head_roll"
             ],
+            default_pos={
+                "left_hip_yaw": 0.0,
+                "left_hip_roll": -0.08726646259971647,
+                "left_hip_pitch": -0.457924,
+                "left_knee": -0.004940,
+                "left_ankle": 0.452984,
+                "neck_pitch": 0.3490658503988659,
+                "head_pitch": 0.3490658503988659,
+                "head_yaw": 0.0,
+                "head_roll": 0.0,
+                "right_hip_yaw": 0.0,
+                "right_hip_roll": 0.08726646259971647,
+                "right_hip_pitch": 0.457924,
+                "right_knee": 0.004940,
+                "right_ankle": -0.452984,
+            },
             kp= 0.55,
             kv= 0.0
         )

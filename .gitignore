@@ -5,26 +5,40 @@ logs/
 *.out
 *.tfevents.*
 
-# Modelos y artefactos entrenados
+# Modelos, checkpoints y artefactos de entrenamiento
 *.pt
 *.pth
 *.ckpt
 *.onnx
+*.bin
+*.joblib
+*.pkl
+*.pickle
 
-# Videos y capturas generadas
+# Videos, captures y resultados generados
 videos/
 **/videos/
 *.mp4
 *.gif
 *.webm
+*.avi
+*.mov
+*.png
+*.jpg
+*.jpeg
 
-# Entornos locales y caches
+# Entornos locales, caches y dependencias temporales
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 .venv/
 venv/
 env/
+env*/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
 # Variables de entorno y archivos sensibles
 .env
@@ -33,13 +47,40 @@ env/
 *.key
 *.crt
 *.p12
+*.sqlite3
+*.db
 
-# Archivos temporales del editor
+# Archivos temporales del editor y del sistema
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*~
 
-.vscode/
-vscode/
+# Carpetas del editor y de agentes
+/.vscode/
+/vscode/
+/.agents/
+/agents/
 
-.agents/
-agents/
+# Archivos de contexto y agentes del repositorio
+/AGENTS.md
+/CLAUDE.md
+/CONTEXT.md
+
+# Archivos Markdown dentro de carpetas de agentes
+/.agents/**/*.md
+/agents/**/*.md
+
+# Resultados y salidas del proyecto
+results/
+**/results/
+artifacts/
+**/artifacts/
+checkpoints/
+**/checkpoints/
+outputs/
+**/outputs/
+
+/scripts/
+skills-lock.json
