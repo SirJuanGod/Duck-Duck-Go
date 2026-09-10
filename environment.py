@@ -65,7 +65,7 @@ class DuckDuckEnv(ManagedEnvironment):
                 refresh_rate= int(0.5/self.dt)
             ),
             rigid_options=gs.options.RigidOptions(
-                dt=self.dt,
+                dt=self.dt /2 ,
                 constraint_solver=gs.constraint_solver.Newton,
                 enable_collision=True,
                 enable_joint_limit=True,
