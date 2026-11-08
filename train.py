@@ -1,6 +1,8 @@
 import os
+import re
 import glob
 import argparse
+import time
 import genesis as gs
 from genesis_forge.wrappers import RslRlWrapper, VideoWrapper
 from rsl_rl.runners import OnPolicyRunner
@@ -23,16 +25,14 @@ parser.add_argument("--no_video",              action="store_true", default=Fals
 parser.add_argument("--verbose",               action="store_true", default=False,
                     help="Muestra logs de FPS de Genesis en consola")
 args = parser.parse_args()
+if args.resume_path is not None and not args.resume:
+    parser.error("--resume_path requiere --resume")
+if args.num_envs < 1:
+    parser.error("--num_envs debe ser >= 1")
 
 # ── Intervalos proporcionales a max_iterations ─────────────────────────────────
 # Guarda modelos al 1%, 5%, 10%... del total (min 1 iter)
 save_interval   = max(1, args.max_iterations // 100)   # cada ~1% del total
-# Graba video al 5% del total (no demasiado frecuente)
-record_interval = max(1,args.max_iterations // 60)
-
-if record_interval <= 1:
-    videos_deseados = min(20, args.max_iterations // 2)
-    record_interval = max(1, args.max_iterations // max(1, videos_deseados))
 
 if save_interval <= 1:
     int_deseados = min(20, args.max_iterations // 2)
@@ -45,21 +45,24 @@ log_dir = os.path.join("logs", args.exp_name)
 if args.resume:
     if resume_path is None:
         pattern = os.path.join(log_dir, "**", "model_*.pt")
-        candidates = glob.glob(pattern, recursive=True)
+        candidates = []
+        for p in glob.glob(pattern, recursive=True):
+            m = re.fullmatch(r"model_(\d+)\.pt", os.path.basename(p))
+            if m:
+                candidates.append((int(m.group(1)), p))
         if candidates:
-            # Ordenar por número de iteración extraído del nombre
-            candidates.sort(key=lambda p: int(os.path.splitext(os.path.basename(p))[0].split("_")[-1]))
-            resume_path = candidates[-1]
+            # Mayor iteración; ignora nombres que no sean model_<N>.pt
+            resume_path = max(candidates)[1]
             print(f"[Resume] Cargando checkpoint: {resume_path}")
         else:
             print(f"[Resume] No se encontro ningun checkpoint en {log_dir}/. Iniciando desde cero.")
             args.resume = False
 else:
-    # Si no estamos resumiendo, limpiamos la carpeta de logs para evitar datos sucios
-    import shutil
+    # Sin --resume: no borrar el experimento anterior; moverlo a una carpeta hermana con marca de tiempo
     if os.path.exists(log_dir):
-        print(f"[Limpieza] Borrando logs del experimento anterior en {log_dir}...")
-        shutil.rmtree(log_dir)
+        backup_dir = f"{log_dir}_bak_{time.strftime('%Y%m%d-%H%M%S')}"
+        print(f"[Respaldo] Moviendo logs del experimento anterior a {backup_dir}")
+        os.rename(log_dir, backup_dir)
 
 # ── Genesis ────────────────────────────────────────────────────────────────────
 gs.init(
@@ -90,7 +93,7 @@ env.cfg = {} # type: ignore
 # ── Configuración PPO ──────────────────────────────────────────────────────────
 train_cfg = {
     "seed": 42,
-    "num_steps_per_env": round(98304 / env.num_envs),  # Batch size constante sin importar num_envs
+    "num_steps_per_env": round(98304 / env.num_envs),  # Batch ~98304; exacto solo si num_envs divide 98304
     "save_interval": save_interval,
     "empirical_normalization": None,
     "torch_compile_mode": None,
@@ -151,12 +154,24 @@ train_cfg = {
 
 print(
     f"\n[Config] envs={args.num_envs} | iters={args.max_iterations} | "
-    f"save_every={save_interval} | video_every={record_interval} | "
+    f"save_every={save_interval} | "
     f"resume={args.resume} | device={args.device}\n"
 )
 
 # ── Entrenamiento ──────────────────────────────────────────────────────────────
 runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device) #type: ignore
-runner.learn(num_learning_iterations=train_cfg["runner"]["max_iterations"])
+start_it = 0
+if args.resume and resume_path is not None:
+    # rsl_rl 5.2 no carga el checkpoint desde la configuracion: hay que llamar a load() explicitamente
+    runner.load(resume_path, map_location=str(gs.device))
+    # El checkpoint guarda la ultima iteracion completada: continuar desde la siguiente
+    start_it = runner.current_learning_iteration + 1
+    runner.current_learning_iteration = start_it
+# learn() suma iteraciones a partir de current_learning_iteration; max_iterations es el total
+remaining = max(0, train_cfg["runner"]["max_iterations"] - start_it)
+if remaining > 0:
+    runner.learn(num_learning_iterations=remaining)
+else:
+    print(f"[Resume] El checkpoint ya alcanza max_iterations={args.max_iterations}. Nada que entrenar.")
 
 print(f"Entrenamiento completo. Revisa ./logs y ./logs/{args.exp_name}/videos.")

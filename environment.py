@@ -17,10 +17,29 @@ from genesis_forge.managers import (
     ContactManager
 )
 from genesis_forge.mdp import reset, terminations, observations, rewards
+from smooth_command import SmoothVelocityCommandManager, FilteredPositionActionManager
 
-HEIGHT_OFFSET = 0.09
-INITIAL_BODY_POSITION = [0.0, 0.0, HEIGHT_OFFSET]
+# Alturas de la base (m). En la postura por defecto la base queda a 0.117 m sobre las suelas
+# y en reposo a ~0.115 m. Con 0.09 el robot aparecia con los pies 27 mm bajo el suelo, el
+# terreno no los detectaba y el robot se apoyaba en las piernas.
+SPAWN_HEIGHT       = 0.12    # aparicion: suelas unos mm sobre el suelo
+BASE_HEIGHT_TARGET = 0.115   # objetivo de la recompensa base_height (medido de pie)
+INITIAL_BODY_POSITION = [0.0, 0.0, SPAWN_HEIGHT]
 INITIAL_QUAT = [1.0, 0.0, 0.0, 0.0]
+
+# Perturbaciones de entrenamiento (solo mode="train")
+PUSH_INTERVAL_S = 3.0   # cada cuanto se empuja la base
+PUSH_MAX_VEL    = 0.3   # cambio maximo de velocidad lineal xy por empujon (m/s)
+
+
+def randomize_friction(env, entity, envs_idx, ratio_range):
+    """Multiplica la friccion de todos los links por un factor aleatorio por entorno."""
+    ratios = torch.empty((len(envs_idx), 1), device=gs.device).uniform_(*ratio_range)
+    entity.set_friction_ratio(
+        ratios.expand(-1, entity.n_links),
+        links_idx_local=list(range(entity.n_links)),
+        envs_idx=envs_idx,
+    )
 
 def pose_to_T(pos=(0.0, 0.0, 0.0), quat=(1.0, 0.0, 0.0, 0.0)):
     """Convierte posicion (x,y,z) y cuaternion (w,x,y,z) a matriz homogenea 4x4."""
@@ -58,6 +77,9 @@ class DuckDuckEnv(ManagedEnvironment):
         self.scene = gs.Scene(
             show_viewer=not headless,
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
+            # Solo batching por entorno (necesario para aleatorizar la masa por entorno en
+            # genesis-world >= 1.4); el resto de RigidOptions queda en sus valores por defecto
+            rigid_options=gs.options.RigidOptions(batch_links_info=True),
             viewer_options=gs.options.ViewerOptions(
                 camera_pos=(1.5, 1.5, 1.0),
                 camera_lookat=(0.0, 0.0, 0.5),
@@ -103,18 +125,28 @@ class DuckDuckEnv(ManagedEnvironment):
 
         self.terrain_manager = TerrainManager(self)
 
+        on_reset = {
+            "position": {
+                "fn": reset.randomize_terrain_position(
+                    height_offset=SPAWN_HEIGHT,
+                    terrain_manager=self.terrain_manager,
+                ),
+            },
+        }
+        if self._mode == "train":
+            # Aleatorizacion de dominio en cada reset: masa del tronco y friccion
+            on_reset["mass"] = {
+                "fn": reset.randomize_link_mass_shift(link_name="trunk_base", mass_range=(-0.02, 0.04)),
+            }
+            on_reset["friction"] = {
+                "fn": randomize_friction,
+                "params": {"ratio_range": (0.7, 1.3)},
+            }
+
         self.robot_manager = EntityManager(
             self,
-            entity_attr="robot",
-            on_reset={ 
-                "position": { 
-                    "fn": reset.randomize_terrain_position, #type:ignore
-                    "params": {
-                        "height_offset": HEIGHT_OFFSET,
-                        "terrain_manager": self.terrain_manager,
-                    },
-                },
-            },
+            entity=self.robot,
+            on_reset=on_reset, #type:ignore
         )
 
         self.actuator_manager = ActuatorManager(
@@ -144,20 +176,23 @@ class DuckDuckEnv(ManagedEnvironment):
             kv= 0.0
         )
 
-        self.action_manager = PositionActionManager(
+        self.action_manager = FilteredPositionActionManager(
             self,
+            alpha=0.5,
             scale= 0.5,
             use_default_offset=True,
             actuator_manager=self.actuator_manager,
         )
 
-        self.velocity_command = VelocityCommandManager(
+        self.velocity_command = SmoothVelocityCommandManager(
             self,
             range={ #type:ignore
-                "lin_vel_x": [0.0, 2.0],
+                "lin_vel_x": [0.0, 0.6],   # pierna 0.0975 m: marcha posible hasta ~0.69 m/s (Froude 0.5)
                 "lin_vel_y": [0.0, 0.0],
                 "ang_vel_z": [-0.5, 0.5],
             },
+            # Aceleracion maxima del comando efectivo (unidades/s^2) por componente
+            max_accel={"lin_vel_x": 1.0, "lin_vel_y": 1.0, "ang_vel_z": 2.0},
             resample_time_sec=5.0,
             debug_visualizer=True,
             debug_visualizer_cfg = { #type:ignore
@@ -177,77 +212,75 @@ class DuckDuckEnv(ManagedEnvironment):
             cfg={ #type:ignore
                 "is_alive": {
                     "weight": 0.5,
-                    "fn": lambda env: rewards.is_alive(env),
+                    "fn": rewards.is_alive(),
                 },
                 "tracking_lin_vel": {
                     "weight": 1.5,
-                    "fn": lambda env, r=self.robot_manager, v=self.velocity_command: (
-                        rewards.command_tracking_lin_vel(env, entity_manager=r, vel_cmd_manager=v)
+                    # sensitivity 0.05: con 0.25, quedarse quieto ante 0.3 m/s ya daba el 70%
+                    "fn": rewards.command_tracking_lin_vel(
+                        entity_manager=self.robot_manager,
+                        vel_cmd_manager=self.velocity_command,
+                        sensitivity=0.05,
                     ),
                 },
                 "tracking_ang_vel": {
                     "weight": 0.5,
-                    "fn": lambda env, r=self.robot_manager, v=self.velocity_command: (
-                        rewards.command_tracking_ang_vel(env, entity_manager=r, vel_cmd_manager=v)
+                    # explicito: en genesis-forge 1.0 None la deriva del rango de comandos
+                    "fn": rewards.command_tracking_ang_vel(
+                        entity_manager=self.robot_manager,
+                        vel_cmd_manager=self.velocity_command,
+                        sensitivity=0.25,
                     ),
                 },
                 "feet_air_time": {
                     "weight": 1.0,
-                    "fn": lambda env, c=self.feet_contact_manager, v=self.velocity_command: (
-                        rewards.feet_air_time(
-                            env,
-                            contact_manager=c,
-                            time_threshold=0.2,
-                            time_threshold_max=0.5,
-                            vel_cmd_manager=v,
-                        )
+                    "fn": rewards.feet_air_time(
+                        contact_manager=self.feet_contact_manager,
+                        time_threshold=0.2,
+                        time_threshold_max=0.5,
+                        vel_cmd_manager=self.velocity_command,
                     ),
                 },
                 "feet_slide": {
                     "weight": -0.2,
-                    "fn": lambda env, c=self.feet_contact_manager: (
-                        rewards.feet_slide(env, contact_manager=c)
-                    ),
+                    "fn": rewards.feet_slide(contact_manager=self.feet_contact_manager),
                 },
                 "ang_vel_xy": {
                     "weight": -0.3,
-                    "fn": lambda env, r=self.robot_manager: (
-                        rewards.ang_vel_xy_l2(env, entity_manager=r)
-                    ),
+                    "fn": rewards.ang_vel_xy_l2(entity_manager=self.robot_manager),
                 },
                 "lin_vel_z": {
                     "weight": -0.2,
-                    "fn": lambda env, r=self.robot_manager: (
-                        rewards.lin_vel_z_l2(env, entity_manager=r)
-                    ),
+                    "fn": rewards.lin_vel_z_l2(entity_manager=self.robot_manager),
                 },
                 "flat_orientation": {
                     "weight": -0.5,
-                    "fn": lambda env, r=self.robot_manager: (
-                        rewards.flat_orientation_l2(env, entity_manager=r)
-                    ),
+                    "fn": rewards.flat_orientation_l2(entity_manager=self.robot_manager),
                 },
                 "action_rate": {
                     "weight": -0.2,
-                    "fn": lambda env: rewards.action_rate_l2(env),
+                    "fn": rewards.action_rate_l2(),
                 },
                 "base_height": {
-                    "weight": -0.5,
-                    "fn": lambda env, t=self.terrain_manager, e=self.robot_manager: (
-                        rewards.base_height(env, target_height=HEIGHT_OFFSET, terrain_manager=t, entity_manager=e)
+                    # error en m^2: con -0.5, 1 cm de error pesaba 5e-5 y el termino no hacia nada
+                    "weight": -50.0,
+                    "fn": rewards.base_height(
+                        target_height=BASE_HEIGHT_TARGET,
+                        terrain_manager=self.terrain_manager,
+                        entity_manager=self.robot_manager,
                     ),
                 },
                 "stand_still": {
                     "weight": -0.5,
-                    "fn": lambda env, a=self.actuator_manager, v=self.velocity_command: (
-                        rewards.stand_still_joint_deviation_l1(env, vel_cmd_manager=v, actuator_manager=a)
+                    "fn": rewards.stand_still_joint_deviation_l1(
+                        vel_cmd_manager=self.velocity_command,
+                        actuator_manager=self.actuator_manager,
                     ),
                 },
                 "contact_force": {
                     "weight": -0.01,
-                    "fn": lambda env, c=self.feet_contact_manager: (
-                        rewards.contact_force(env, contact_manager=c, threshold=1.0)
-                    ),
+                    # umbral ~1.5x el peso (7.2 N): penaliza impactos, no el apoyo normal
+                    "fn": rewards.contact_force(contact_manager=self.feet_contact_manager, threshold=11.0),
                 },
             },
         )
@@ -257,24 +290,20 @@ class DuckDuckEnv(ManagedEnvironment):
             logging_enabled=True,
             term_cfg={ #type:ignore
                 "timeout": {
-                    "fn": terminations.timeout,
+                    "fn": terminations.timeout(),
                     "time_out": True,
                 },
 
                 "out_of_bounds": {
-                    "fn": terminations.out_of_bounds,
-                    "params": {
-                        "terrain_manager": self.terrain_manager,
-                    },
+                    "fn": terminations.out_of_bounds(terrain_manager=self.terrain_manager),
                 },
 
                 "bad_orientation": {
-                    "fn": terminations.bad_orientation,
-                    "params": {
-                        "limit_angle": 30.0,
-                        "entity_manager": self.robot_manager,
-                        "grace_steps": 20,
-                    },
+                    "fn": terminations.bad_orientation(
+                        limit_angle=30.0,
+                        entity_manager=self.robot_manager,
+                        grace_steps=20,
+                    ),
                 },
             },
         )
@@ -324,11 +353,11 @@ class DuckDuckEnv(ManagedEnvironment):
                     "fn": lambda env: self.action_manager.get_actions(),
                 },
                 "dof_force": {
-                    "fn": lambda env, a=self.actuator_manager: observations.entity_dofs_force(env, actuator_manager=a),
+                    "fn": observations.entity_dofs_force(actuator_manager=self.actuator_manager),
                     "scale": 0.01,
                 },
                 "contact_force": {
-                    "fn": lambda env, c=self.feet_contact_manager: observations.contact_force(env, contact_manager=c),
+                    "fn": observations.contact_force(contact_manager=self.feet_contact_manager),
                     "scale": 0.01,
                 },
             },
@@ -364,6 +393,25 @@ class DuckDuckEnv(ManagedEnvironment):
                 },
             ),
         )
+
+    def step(self, actions):
+        result = super().step(actions)
+        if self._mode == "train":
+            self._apply_pushes()
+        return result
+
+    def _apply_pushes(self):
+        """Empujon: suma una velocidad lineal xy aleatoria a la base cada PUSH_INTERVAL_S."""
+        push_steps = max(1, int(PUSH_INTERVAL_S / self.dt))
+        envs_idx = (
+            (self.episode_length > 0) & (self.episode_length % push_steps == 0)
+        ).nonzero(as_tuple=False).flatten()
+        if len(envs_idx) == 0:
+            return
+        # DOFs locales 0 y 1 = traslacion x, y del freejoint de la base
+        vel = self.robot.get_dofs_velocity(dofs_idx_local=[0, 1], envs_idx=envs_idx)
+        vel = vel + torch.empty_like(vel).uniform_(-PUSH_MAX_VEL, PUSH_MAX_VEL)
+        self.robot.set_dofs_velocity(vel, dofs_idx_local=[0, 1], envs_idx=envs_idx)
 
     def build(self):
         super().build()

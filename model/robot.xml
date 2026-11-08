@@ -13,42 +13,10 @@
         <geom group="3"/>
       </default>
     </default>
-    <default class="perfect_actuator">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.15" frictionloss="0.1" armature="0.001"/>
-      <position kp="10.0" kv="0.1" forcerange="-20.0 20.0"/>
-    </default>
-
-    <default class="chosen_actuator_old">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.048" frictionloss="0.006" armature="0.002"/>
-      <position kp="0.52" kv="0.0" forcerange="-0.91 0.91" ctrlrange="-10.0 10.0"/>
-    </default>
-
-    <default class="chosen_actuator_new">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.041" frictionloss="0.032" armature="0.002"/>
-      <position kp="0.386" kv="0.0" forcerange="-0.67 0.67" ctrlrange="-10.0 10.0"/>
-    </default>
-
-    <default class="chosen_actuator_antoine">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.044" frictionloss="0.013" armature="0.0017"/>
-      <position kp="0.43" kv="0.0" forcerange="-0.75 0.75" ctrlrange="-10.0 10.0"/>
-    </default>
-
     <default class="chosen_actuator">
       <geom contype="0" conaffinity="0"/>
       <joint damping="0.053" frictionloss="0.0048" armature="0.0018"/>
       <position kp="0.55" kv="0.0" forcerange="-0.96 0.96" ctrlrange="-10.0 10.0"/>
-    </default>
-    <default class="passive_wheel">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.0" frictionloss="0.0" armature="0.0001"/>
-    </default>
-    <default class="passive_joint">
-      <geom contype="0" conaffinity="0"/>
-      <joint damping="0.0" frictionloss="0.0" armature="0.0001"/>
     </default>
     <default class="self_collision_only">
       <geom group="3" contype="2" conaffinity="2"/>
@@ -90,7 +58,7 @@
       <!-- Motor XL-330 izq superior (solo visual) -->
       <geom type="mesh" class="visual" pos="0.006 0.0175 0.0115" quat="0 0.707107 -0 0.707107"
             mesh="xl330" material="xl330_material"/>
-      <!-- Soporte de alimentacion: visual + self_collision_only (choca con partes del robot) -->
+      <!-- Soporte de alimentacion: visual + geom self_collision_only (bits 2/2, sin contacto con otras geoms del robot) -->
       <geom type="mesh" class="visual"             pos="0.004 -0 -0.0175215" quat="0.707107 -0 0 0.707107"
             mesh="power_support" material="power_support_material"/>
       <geom type="mesh" class="self_collision_only" pos="0.004 -0 -0.0175215" quat="0.707107 -0 0 0.707107"
@@ -276,9 +244,7 @@
                     mesh="soft_mouth_top" material="soft_mouth_top_material"/>
               <geom type="mesh" class="visual" pos="-0.0045 -9.13778e-05 -0.0178" quat="0.5 0.5 0.5 0.5"
                     mesh="noenoeil" material="noenoeil_material"/>
-              <!-- Mandibula: visual + colision activa
-                   NOTA: puede solapar bottom_head_shell ~2cm por closed-loop linkage.
-                   Descomentar exclude en <equality> si causa self-collision constante. -->
+              <!-- Mandibula: visual + colision activa. jaw y bottom_head_shell son geoms del body jaw_soft (no bodies distintos): no generan contacto entre si. -->
               <geom type="mesh" class="visual"    pos="-0.0045 0 -0.018" quat="0.5 0.5 0.5 0.5"
                     mesh="jaw" material="jaw_material"/>
               <geom type="mesh" class="collision" pos="-0.0045 0 -0.018" quat="0.5 0.5 0.5 0.5"
@@ -511,12 +477,8 @@
     <position class="chosen_actuator" name="right_ankle"     joint="right_ankle"/>
   </actuator>
 
-  <!-- Bloque equality reservado para constraints de closed-loop.
-       Descomentar para excluir colision jaw/bottom_head_shell:
-         <contact>
-           <exclude body1="jaw" body2="bottom_head_shell"/>
-         </contact>
-  -->
+  <!-- Sin constraints de closed-loop. Si hace falta excluir contacto entre dos bodies distintos, usar
+       <contact><exclude body1="..." body2="..."/></contact> con nombres de body reales. -->
   <equality/>
 
 </mujoco>
